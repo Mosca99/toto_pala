@@ -7,10 +7,20 @@ import os
 # ------------------------------
 st.set_page_config(page_title="Classifica Giocatori", layout="wide")
 
-PASSWORD_ADMIN = "admin123"  # <-- Cambia qui la tua password
+PASSWORD_ADMIN = "fantazzolo2025"  # <-- Cambia qui la tua password
 DATA_FILE = "punteggi.csv"
 
-GIOCATORI = [f"Giocatore {i}" for i in range(1, 11)]
+GIOCATORI = [
+    "Luca Inte",
+    "Masi",
+    "Mosca",
+    "Rego",
+    "Ripa",
+    "Samu",
+    "Ste",
+    "Tony",
+    "Vito"
+]
 NUM_GIORNATE = 30
 
 # ------------------------------
