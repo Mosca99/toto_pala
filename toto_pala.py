@@ -17,6 +17,7 @@ GIOCATORI = [
     "Rego",
     "Ripa",
     "Samu",
+    "Spaglia",
     "Ste",
     "Tony",
     "Vito"
