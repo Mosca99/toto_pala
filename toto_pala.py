@@ -182,4 +182,27 @@ elif pagina == "Inserimento Giocatori":
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
 
-    if username
+    if username in GIOCATORI_CREDS and password == GIOCATORI_CREDS[username]:
+        st.success(f"Accesso consentito: {username}")
+        giornata = st.number_input("Seleziona giornata (6-30)", min_value=6, max_value=30, step=1)
+
+        df_ris = st.session_state.risultati_giocatori
+        st.subheader(f"Giornata {giornata}")
+        risultati = []
+        col1, col2 = st.columns(2)
+        for i in range(8):
+            with (col1 if i % 2 == 0 else col2):
+                val = st.selectbox(f"Partita {i+1}", options=["1","X","2"], key=f"{username}_{giornata}_{i}")
+                risultati.append(val)
+
+        if st.button("💾 Salva Risultati"):
+            df_ris = df_ris[~((df_ris["username"]==username) & (df_ris["giornata"]==giornata))]
+            nuovo_record = {"username": username, "giornata": giornata}
+            for i in range(8):
+                nuovo_record[f"partita{i+1}"] = risultati[i]
+            df_ris = pd.concat([df_ris, pd.DataFrame([nuovo_record])], ignore_index=True)
+            st.session_state.risultati_giocatori = df_ris
+            st.success("Risultati salvati correttamente ✅")
+
+    elif username or password:
+        st.error("Username o password errati ❌")
