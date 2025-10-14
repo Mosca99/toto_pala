@@ -1,45 +1,84 @@
 import streamlit as st
 import pandas as pd
 import os
+import base64
+import requests
 
 # ------------------------------
 # CONFIGURAZIONE BASE
 # ------------------------------
 st.set_page_config(page_title="Classifica Giocatori", layout="wide")
 
-PASSWORD_ADMIN = "fantazzolo2025"  # <-- Cambia qui la tua password
-DATA_FILE = "punteggi.csv"
+PASSWORD_ADMIN = "fantazzolo2025"  # <-- cambia qui la password admin
+NUM_GIORNATE = 30
 
 GIOCATORI = [
-    "Luca Inte",
-    "Masi",
-    "Mosca",
-    "Rego",
-    "Ripa",
-    "Samu",
-    "Spaglia",
-    "Ste",
-    "Tony",
-    "Vito"
+    "Luca Inte", "Masi", "Mosca", "Rego", "Ripa",
+    "Samu", "Spaglia", "Ste", "Tony", "Vito"
 ]
-NUM_GIORNATE = 30
+
+# ------------------------------
+# CONFIGURAZIONE GITHUB
+# ------------------------------
+GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
+GITHUB_REPO = st.secrets["GITHUB_REPO"]
+GITHUB_FILE = st.secrets["GITHUB_FILE"]
+BRANCH = "main"
+
+def github_api(url):
+    return f"https://api.github.com/repos/{GITHUB_REPO}/{url}"
+
+def get_file_sha():
+    """Recupera lo SHA del file su GitHub (serve per aggiornare)."""
+    r = requests.get(
+        github_api(f"contents/{GITHUB_FILE}"),
+        headers={"Authorization": f"token {GITHUB_TOKEN}"}
+    )
+    if r.status_code == 200:
+        return r.json()["sha"]
+    return None
+
+def save_data(df):
+    """Scrive il CSV aggiornato su GitHub."""
+    csv_bytes = df.to_csv(index=False).encode("utf-8")
+    b64_content = base64.b64encode(csv_bytes).decode("utf-8")
+    sha = get_file_sha()
+    message = "Aggiornamento punteggi da Streamlit"
+
+    data = {
+        "message": message,
+        "content": b64_content,
+        "branch": BRANCH,
+    }
+    if sha:
+        data["sha"] = sha
+
+    r = requests.put(
+        github_api(f"contents/{GITHUB_FILE}"),
+        headers={"Authorization": f"token {GITHUB_TOKEN}"},
+        json=data,
+    )
+    if r.status_code not in [200, 201]:
+        st.error(f"Errore durante il salvataggio su GitHub: {r.text}")
+
+def load_data():
+    """Legge il CSV da GitHub o lo crea se non esiste."""
+    r = requests.get(
+        github_api(f"contents/{GITHUB_FILE}"),
+        headers={"Authorization": f"token {GITHUB_TOKEN}"}
+    )
+
+    if r.status_code == 200:
+        content = base64.b64decode(r.json()["content"]).decode("utf-8")
+        return pd.read_csv(pd.compat.StringIO(content))
+    else:
+        df = pd.DataFrame(columns=["giornata", "giocatore", "punteggio"])
+        save_data(df)
+        return df
 
 # ------------------------------
 # FUNZIONI DI SUPPORTO
 # ------------------------------
-
-def init_data():
-    """Crea o carica il file dati."""
-    if not os.path.exists(DATA_FILE):
-        df = pd.DataFrame(columns=["giornata", "giocatore", "punteggio"])
-        df.to_csv(DATA_FILE, index=False)
-    else:
-        df = pd.read_csv(DATA_FILE)
-    return df
-
-def salva_dati(df):
-    df.to_csv(DATA_FILE, index=False)
-
 def reset_da_giornata(df):
     """Se qualcuno ha preso 8, azzera la classifica da quella giornata in poi."""
     giornate_reset = df[df["punteggio"] == 8]["giornata"]
@@ -54,111 +93,65 @@ def calcola_classifica(df):
         return pd.DataFrame(columns=["giocatore", "punti_classifica", "somma_punteggi"])
     
     df_valido = reset_da_giornata(df.copy())
-
     punti_classifica = {g: 0 for g in GIOCATORI}
     somma_punteggi = {g: 0 for g in GIOCATORI}
 
-    for giornata, gruppo in df_valido.groupby("giornata"):
-        max_p = gruppo["punteggio"].max()
-        vincitori = gruppo[gruppo["punteggio"] == max_p]["giocatore"]
-        for v in vincitori:
-            punti_classifica[v] += 1
-        for _, riga in gruppo.iterrows():
-            somma_punteggi[riga["giocatore"]] += riga["punteggio"]
+    for giornata in sorted(df_valido["giornata"].unique()):
+        subset = df_valido[df_valido["giornata"] == giornata]
+        if subset.empty:
+            continue
+
+        subset = subset.sort_values("punteggio", ascending=True)
+        for idx, (giocatore, punteggio) in enumerate(zip(subset["giocatore"], subset["punteggio"])):
+            punti = len(GIOCATORI) - idx
+            punti_classifica[giocatore] += punti
+            somma_punteggi[giocatore] += punteggio
 
     classifica = pd.DataFrame({
-        "giocatore": GIOCATORI,
-        "punti_classifica": [punti_classifica[g] for g in GIOCATORI],
-        "somma_punteggi": [somma_punteggi[g] for g in GIOCATORI]
-    }).sort_values(
-        by=["punti_classifica", "somma_punteggi"], ascending=[False, False]
-    ).reset_index(drop=True)
-
+        "giocatore": list(punti_classifica.keys()),
+        "punti_classifica": list(punti_classifica.values()),
+        "somma_punteggi": list(somma_punteggi.values())
+    })
+    classifica = classifica.sort_values(["punti_classifica", "somma_punteggi"], ascending=[False, True])
     return classifica
 
-def calcola_classifica_giornata(df, giornata):
-    """Restituisce la classifica di una giornata specifica."""
-    gior = df[df["giornata"] == giornata]
-    if gior.empty:
-        return pd.DataFrame(columns=["giocatore", "punteggio"])
-    return gior.sort_values(by="punteggio", ascending=False)
-
 # ------------------------------
-# INTERFACCIA STREAMLIT
+# INTERFACCIA UTENTE
 # ------------------------------
+st.title("⚽ Classifica Giocatori")
 
-st.sidebar.title("🏆 Menu")
-pagina = st.sidebar.radio(
-    "Naviga tra le pagine:",
-    ["Classifica Generale", "Classifiche per Giornata", "Area Admin"]
-)
+df = load_data()
 
-df = init_data()
+# --- Modalità admin ---
+st.sidebar.header("Area Admin")
+password = st.sidebar.text_input("Password Admin", type="password")
 
-# ==============================
-# PAGINA 1 - CLASSIFICA GENERALE
-# ==============================
-if pagina == "Classifica Generale":
-    st.title("🏆 Classifica Generale")
-    classifica = calcola_classifica(df)
-    st.dataframe(classifica, use_container_width=True)
+if password == PASSWORD_ADMIN:
+    st.sidebar.success("Accesso Admin riuscito ✅")
 
-# ==============================
-# PAGINA 2 - CLASSIFICHE PER GIORNATA
-# ==============================
-elif pagina == "Classifiche per Giornata":
-    st.title("📅 Classifiche per Giornata")
+    giornata = st.sidebar.number_input("Giornata", min_value=1, max_value=NUM_GIORNATE, step=1)
+    giocatore = st.sidebar.selectbox("Giocatore", GIOCATORI)
+    punteggio = st.sidebar.number_input("Punteggio", min_value=0, max_value=10, step=1)
 
-    if df.empty:
-        st.info("Nessun punteggio inserito ancora.")
-    else:
-        # Manteniamo lo stato della giornata selezionata
-        if "giornata_sel" not in st.session_state:
-            st.session_state["giornata_sel"] = int(df["giornata"].min())
+    if st.sidebar.button("Salva Punteggio"):
+        nuovo = pd.DataFrame([{"giornata": giornata, "giocatore": giocatore, "punteggio": punteggio}])
+        df = pd.concat([df, nuovo], ignore_index=True)
+        save_data(df)
+        st.sidebar.success(f"Punteggio salvato per {giocatore} (giornata {giornata}) ✅")
 
-        col1, col2, col3 = st.columns([1,2,1])
-        with col1:
-            if st.button("⬅️ Giorno precedente", use_container_width=True):
-                st.session_state["giornata_sel"] = max(1, st.session_state["giornata_sel"] - 1)
-        with col3:
-            if st.button("Giorno successivo ➡️", use_container_width=True):
-                st.session_state["giornata_sel"] = min(NUM_GIORNATE, st.session_state["giornata_sel"] + 1)
+    if st.sidebar.button("Reset Tutti i Dati"):
+        df = pd.DataFrame(columns=["giornata", "giocatore", "punteggio"])
+        save_data(df)
+        st.sidebar.warning("Tutti i dati sono stati resettati ⚠️")
 
-        giornata_sel = st.session_state["giornata_sel"]
-        st.subheader(f"Giornata {giornata_sel}")
+else:
+    st.sidebar.warning("Inserisci la password admin per modificare i dati")
 
-        gior_df = calcola_classifica_giornata(df, giornata_sel)
-        if gior_df.empty:
-            st.warning("Nessun punteggio per questa giornata.")
-        else:
-            st.dataframe(gior_df, use_container_width=True)
+# --- Mostra la classifica ---
+st.subheader("📊 Classifica Attuale")
+classifica = calcola_classifica(df)
+st.dataframe(classifica, use_container_width=True)
 
-# ==============================
-# PAGINA 3 - AREA ADMIN
-# ==============================
-elif pagina == "Area Admin":
-    st.title("🔒 Area Amministratore")
-
-    password = st.text_input("Inserisci la password:", type="password")
-    if password == PASSWORD_ADMIN:
-        st.success("Accesso consentito ✅")
-
-        giornata = st.number_input("Giornata", min_value=1, max_value=NUM_GIORNATE, step=1)
-        st.write("Inserisci i punteggi (da 0 a 8):")
-
-        nuovi_punteggi = []
-        cols = st.columns(2)
-        for i, g in enumerate(GIOCATORI):
-            with cols[i % 2]:
-                val = st.number_input(g, min_value=0, max_value=8, step=1, key=f"{giornata}_{g}")
-                nuovi_punteggi.append({"giornata": giornata, "giocatore": g, "punteggio": val})
-
-        if st.button("💾 Salva Punteggi"):
-            df = df[~(df["giornata"] == giornata)]  # rimuove eventuali record precedenti della giornata
-            df = pd.concat([df, pd.DataFrame(nuovi_punteggi)], ignore_index=True)
-            salva_dati(df)
-            st.success(f"Punteggi della giornata {giornata} salvati correttamente!")
-
-    elif password != "":
-        st.error("Password errata ❌")
-
+# --- Mostra i dati grezzi ---
+with st.expander("Mostra dati grezzi"):
+    st.dataframe(df, use_container_width=True)
