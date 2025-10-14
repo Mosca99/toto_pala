@@ -61,6 +61,8 @@ def save_data(df):
     if r.status_code not in [200, 201]:
         st.error(f"Errore durante il salvataggio su GitHub: {r.text}")
 
+from io import StringIO
+
 def load_data():
     """Legge il CSV da GitHub o lo crea se non esiste."""
     r = requests.get(
@@ -70,7 +72,7 @@ def load_data():
 
     if r.status_code == 200:
         content = base64.b64decode(r.json()["content"]).decode("utf-8")
-        return pd.read_csv(pd.compat.StringIO(content))
+        return pd.read_csv(StringIO(content))
     else:
         df = pd.DataFrame(columns=["giornata", "giocatore", "punteggio"])
         save_data(df)
